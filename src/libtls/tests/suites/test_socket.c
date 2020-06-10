@@ -416,6 +416,16 @@ static void test_tls(tls_version_t version, uint16_t port, bool cauth, u_int i)
 	char suite[128];
 	int count;
 
+	count = tls_crypto_get_supported_suites(TRUE, &suites);
+	ck_assert(i < count);
+	if (tls_crypto_suite_min_version(suites[i]) > version)
+	{
+		warn("ignoring suite %N for %N", tls_cipher_suite_names, suites[i],
+			 tls_version_names, version);
+		free(suites);
+		return;
+	}
+
 	INIT(config,
 		.version = version,
 		.addr = "127.0.0.1",
@@ -426,9 +436,6 @@ static void test_tls(tls_version_t version, uint16_t port, bool cauth, u_int i)
 
 	start_echo_server(config);
 
-	count = tls_crypto_get_supported_suites(TRUE, &suites);
-
-	ck_assert(i < count);
 	snprintf(suite, sizeof(suite), "%N", tls_cipher_suite_names, suites[i]);
 	lib->settings->set_str(lib->settings, "%s.tls.suites", suite, lib->ns);
 

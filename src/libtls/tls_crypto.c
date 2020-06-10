@@ -1,4 +1,9 @@
 /*
+ * Copyright (C) 2020 Tobias Brunner
+ * Copyright (C) 2020 Pascal Knecht
+ * Copyright (C) 2020 Méline Sieber
+ * HSR Hochschule fuer Technik Rapperswil
+ *
  * Copyright (C) 2010-2014 Martin Willi
  * Copyright (C) 2010-2014 revosec AG
  *
@@ -315,11 +320,11 @@ ENUM_BEGIN(tls_named_group_names, TLS_SECT163K1, TLS_SECP521R1,
 	"SECP384R1",
 	"SECP521R1",
 );
-ENUM_NEXT(tls_named_group_names, TLS_CURVE25519, TLS_CURVE_448, TLS_SECP521R1,
+ENUM_NEXT(tls_named_group_names, TLS_CURVE25519, TLS_CURVE448, TLS_SECP521R1,
 	"CURVE25519",
 	"CURVE448",
 );
-ENUM_NEXT(tls_named_group_names, TLS_FFDHE2048, TLS_FFDHE8192, TLS_CURVE_448,
+ENUM_NEXT(tls_named_group_names, TLS_FFDHE2048, TLS_FFDHE8192, TLS_CURVE448,
 	"FFDHE2048",
 	"FFDHE3072",
 	"FFDHE4096",
@@ -390,35 +395,6 @@ struct private_tls_crypto_t {
 	 * ECDSA supported?
 	 */
 	bool ecdsa;
-
-	/**
-	 * MD5 supported?
-	 */
-	bool md5;
-
-	/**
-	 * SHA1 supported?
-	 */
-	bool sha1;
-	/**
-	 * SHA224 supported?
-	 */
-	bool sha224;
-
-	/*
-	 * SHA256 supported?
-	 */
-	bool sha256;
-
-	/**
-	 * SHA384 supported?
-	 */
-	bool sha384;
-
-	/**
-	 * SHA512 supported?
-	 */
-	bool sha512;
 
 	/**
 	 * TLS context
@@ -514,7 +490,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_ECDSA, ECP_256_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_AES_CBC, 16,
-		TLS_1_2,
+		TLS_1_0,
 	},
 	{ TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
 		KEY_ECDSA, ECP_256_BIT,
@@ -526,7 +502,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_ECDSA, ECP_384_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_AES_CBC, 32,
-		TLS_1_2,
+		TLS_1_0,
 	},
 	{ TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384,
 		KEY_ECDSA, ECP_384_BIT,
@@ -550,7 +526,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, ECP_256_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_AES_CBC, 16,
-		TLS_1_2,
+		TLS_1_0,
 	},
 	{ TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
 		KEY_RSA, ECP_256_BIT,
@@ -562,7 +538,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, ECP_384_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_AES_CBC, 32,
-		TLS_1_2,
+		TLS_1_0,
 	},
 	{ TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,
 		KEY_RSA, ECP_384_BIT,
@@ -586,7 +562,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_2048_BIT,
 		HASH_SHA256,PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_AES_CBC, 16,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_DHE_RSA_WITH_AES_128_CBC_SHA256,
 		KEY_RSA, MODP_3072_BIT,
@@ -598,7 +574,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_3072_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_AES_CBC, 32,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_DHE_RSA_WITH_AES_256_CBC_SHA256,
 		KEY_RSA, MODP_4096_BIT,
@@ -622,7 +598,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_2048_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_CAMELLIA_CBC, 16,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA256,
 		KEY_RSA, MODP_3072_BIT,
@@ -634,7 +610,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_3072_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_CAMELLIA_CBC, 32,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA256,
 		KEY_RSA, MODP_4096_BIT,
@@ -646,13 +622,13 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_2048_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_3DES, 0,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_RSA_WITH_AES_128_CBC_SHA,
 		KEY_RSA, MODP_NONE,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_AES_CBC, 16,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_RSA_WITH_AES_128_CBC_SHA256,
 		KEY_RSA, MODP_NONE,
@@ -664,7 +640,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_NONE,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_AES_CBC, 32,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_RSA_WITH_AES_256_CBC_SHA256,
 		KEY_RSA, MODP_NONE,
@@ -688,7 +664,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_NONE,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_CAMELLIA_CBC, 16,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_RSA_WITH_CAMELLIA_128_CBC_SHA256,
 		KEY_RSA, MODP_NONE,
@@ -700,7 +676,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_NONE,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_CAMELLIA_CBC, 32,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_RSA_WITH_CAMELLIA_256_CBC_SHA256,
 		KEY_RSA, MODP_NONE,
@@ -712,37 +688,37 @@ static suite_algs_t suite_algs[] = {
 		KEY_ECDSA, ECP_256_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_3DES, 0,
-		TLS_1_2,
+		TLS_1_0,
 	},
 	{ TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
 		KEY_RSA, ECP_256_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_3DES, 0,
-		TLS_1_2,
+		TLS_1_0,
 	},
 	{ TLS_RSA_WITH_3DES_EDE_CBC_SHA,
 		KEY_RSA, MODP_NONE,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_3DES, 0,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_ECDHE_ECDSA_WITH_NULL_SHA,
 		KEY_ECDSA, ECP_256_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_NULL, 0,
-		TLS_1_2,
+		TLS_1_0,
 	},
 	{ TLS_ECDHE_RSA_WITH_NULL_SHA,
 		KEY_ECDSA, ECP_256_BIT,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_NULL, 0,
-		TLS_1_2,
+		TLS_1_0,
 	},
 	{ TLS_RSA_WITH_NULL_SHA,
 		KEY_RSA, MODP_NONE,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_SHA1_160, ENCR_NULL, 0,
-		TLS_1_2,
+		SSL_3_0,
 	},
 	{ TLS_RSA_WITH_NULL_SHA256,
 		KEY_RSA, MODP_NONE,
@@ -754,7 +730,7 @@ static suite_algs_t suite_algs[] = {
 		KEY_RSA, MODP_NONE,
 		HASH_SHA256, PRF_HMAC_SHA2_256,
 		AUTH_HMAC_MD5_128, ENCR_NULL, 0,
-		TLS_1_2,
+		SSL_2_0,
 	},
 };
 
@@ -823,8 +799,12 @@ static void filter_suite(suite_algs_t suites[], int *count, int offset,
 				}
 			}
 			if (current.prf && current.prf != suites[i].prf)
-			{	/* skip, PRF does not match */
-				continue;
+			{
+				if (suites[i].prf != PRF_UNDEFINED)
+				{
+					/* skip, PRF does not match nor is it undefined */
+					continue;
+				}
 			}
 			if (current.hash && current.hash != suites[i].hash)
 			{	/* skip, hash does not match */
@@ -1108,13 +1088,10 @@ static void filter_specific_config_suites(private_tls_crypto_t *this,
 static void filter_unsupported_suites(suite_algs_t suites[], int *count)
 {
 	/* filter suite list by each algorithm */
-	if (suites->tls_version < TLS_1_3)
-	{
-		filter_suite(suites, count, offsetof(suite_algs_t, encr),
-					 lib->crypto->create_aead_enumerator);
-		filter_suite(suites, count, offsetof(suite_algs_t, prf),
-					 lib->crypto->create_prf_enumerator);
-	}
+	filter_suite(suites, count, offsetof(suite_algs_t, encr),
+				 lib->crypto->create_aead_enumerator);
+	filter_suite(suites, count, offsetof(suite_algs_t, prf),
+				 lib->crypto->create_prf_enumerator);
 	filter_suite(suites, count, offsetof(suite_algs_t, encr),
 				 lib->crypto->create_crypter_enumerator);
 	filter_suite(suites, count, offsetof(suite_algs_t, mac),
@@ -1239,10 +1216,6 @@ static bool create_aead(private_tls_crypto_t *this, suite_algs_t *algs)
 	{
 		this->aead_in = tls_aead_create_seq(algs->encr, algs->encr_size);
 		this->aead_out = tls_aead_create_seq(algs->encr, algs->encr_size);
-
-		this->protection->set_cipher(this->protection, TRUE, this->aead_in);
-		this->protection->set_cipher(this->protection, FALSE, this->aead_out);
-
 	}
 	if (!this->aead_in || !this->aead_out)
 	{
@@ -1388,9 +1361,11 @@ METHOD(tls_crypto_t, get_signature_algorithms, void,
 	private_tls_crypto_t *this, bio_writer_t *writer)
 {
 	bio_writer_t *supported;
+	tls_version_t version;
 	int i;
 
 	supported = bio_writer_create(32);
+	version = this->tls->get_version_max(this->tls);
 
 	for (i = 0; i < countof(schemes); i++)
 	{
@@ -1402,27 +1377,11 @@ METHOD(tls_crypto_t, get_signature_algorithms, void,
 		{
 			continue;
 		}
-		if (schemes[i].hash == TLS_HASH_MD5 && !this->md5)
+		if (schemes[i].hash == TLS_HASH_MD5 && version >= TLS_1_3)
 		{
 			continue;
 		}
-		if (schemes[i].hash == TLS_HASH_SHA1 && !this->sha1)
-		{
-			continue;
-		}
-		if (schemes[i].hash == TLS_HASH_SHA224 && !this->sha224)
-		{
-			continue;
-		}
-		if (schemes[i].hash == TLS_HASH_SHA256 && !this->sha256)
-		{
-			continue;
-		}
-		if (schemes[i].hash == TLS_HASH_SHA384 && !this->sha384)
-		{
-			continue;
-		}
-		if (schemes[i].hash == TLS_HASH_SHA512 && !this->sha512)
+		if (schemes[i].hash == TLS_HASH_SHA224 && version >= TLS_1_3)
 		{
 			continue;
 		}
@@ -1475,6 +1434,8 @@ static struct {
 	{ ECP_521_BIT, TLS_SECP521R1},
 	{ ECP_224_BIT, TLS_SECP224R1},
 	{ ECP_192_BIT, TLS_SECP192R1},
+	{ CURVE_25519, TLS_CURVE25519},
+	{ CURVE_448,   TLS_CURVE448},
 };
 
 CALLBACK(group_filter, bool,
@@ -1584,6 +1545,26 @@ static bool hash_data(private_tls_crypto_t *this, chunk_t data, chunk_t *hash)
 	return TRUE;
 }
 
+/**
+ * TLS 1.3 static part of the data the server signs (64 spaces followed by the
+ * context string "TLS 1.3, server CertificateVerify" and a 0 byte).
+ */
+static chunk_t tls13_sig_data_server = chunk_from_chars(
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+	0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+	0x54, 0x4c, 0x53, 0x20, 0x31, 0x2e, 0x33, 0x2c,
+	0x20, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x20,
+	0x43, 0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63,
+	0x61, 0x74, 0x65, 0x56, 0x65, 0x72, 0x69, 0x66,
+	0x79, 0x00,
+);
+
 METHOD(tls_crypto_t, sign, bool,
 	private_tls_crypto_t *this, private_key_t *key, bio_writer_t *writer,
 	chunk_t data, chunk_t hashsig)
@@ -1671,64 +1652,7 @@ METHOD(tls_crypto_t, verify, bool,
 	private_tls_crypto_t *this, public_key_t *key, bio_reader_t *reader,
 	chunk_t data)
 {
-	if (this->tls->get_version_max(this->tls) == TLS_1_3)
-	{
-		signature_scheme_t scheme = SIGN_UNKNOWN;
-		uint8_t hash, alg;
-		chunk_t sig, transcript_hash, static_sig_data_all;
-
-		chunk_t static_sig_data = chunk_from_chars(
-			0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-			0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-			0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-			0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-			0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-			0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-			0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-			0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-			0x54, 0x4c, 0x53, 0x20, 0x31, 0x2e, 0x33, 0x2c,
-			0x20, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x20,
-			0x43, 0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63,
-			0x61, 0x74, 0x65, 0x56, 0x65, 0x72, 0x69, 0x66,
-			0x79, 0x00,
-		);
-
-		if (!reader->read_uint8(reader, &hash) ||
-			!reader->read_uint8(reader, &alg) ||
-			!reader->read_data16(reader, &sig))
-		{
-			DBG1(DBG_TLS, "received invalid signature");
-			return FALSE;
-		}
-
-		if (!hash_data(this, data, &transcript_hash))
-		{
-			DBG1(DBG_TLS, "Unable to hash");
-			return FALSE;
-		}
-
-		static_sig_data_all = chunk_cat("cc", static_sig_data, transcript_hash);
-		scheme = hashsig_to_scheme(key->get_type(key), hash, alg);
-		if (scheme == SIGN_UNKNOWN)
-		{
-			DBG1(DBG_TLS, "signature algorithms %N/%N not supported",
-				 tls_hash_algorithm_names, hash,
-				 tls_signature_algorithm_names, alg);
-			return FALSE;
-		}
-		if (!key->verify(key, scheme, NULL, static_sig_data_all, sig))
-		{
-			DBG1(DBG_TLS, "verification of signature failed");
-			return FALSE;
-		}
-		DBG2(DBG_TLS,
-			 "verified signature with %N/%N",
-			 tls_hash_algorithm_names,
-			 hash,
-			 tls_signature_algorithm_names,
-			 alg);
-	}
-	else if (this->tls->get_version_max(this->tls) == TLS_1_2)
+	if (this->tls->get_version_max(this->tls) >= TLS_1_2)
 	{
 		signature_scheme_t scheme = SIGN_UNKNOWN;
 		uint8_t hash, alg;
@@ -1749,8 +1673,23 @@ METHOD(tls_crypto_t, verify, bool,
 				 tls_signature_algorithm_names, alg);
 			return FALSE;
 		}
+		if (this->tls->get_version_max(this->tls) == TLS_1_3)
+		{
+			chunk_t transcript_hash;
+
+			if (!hash_data(this, data, &transcript_hash))
+			{
+				DBG1(DBG_TLS, "Unable to create transcript hash");
+				return FALSE;
+			}
+
+			data = chunk_cata("cm", tls13_sig_data_server, transcript_hash);
+		}
 		if (!key->verify(key, scheme, NULL, data, sig))
 		{
+			DBG1(DBG_TLS, "signature verification with %N/%N failed",
+				 tls_hash_algorithm_names, hash, tls_signature_algorithm_names,
+				 alg);
 			return FALSE;
 		}
 		DBG2(DBG_TLS, "verified signature with %N/%N",
@@ -1838,12 +1777,24 @@ METHOD(tls_crypto_t, calculate_finished_tls13, bool,
 	chunk_t finished_key, finished_hash;
 	prf_t *prf;
 
-	this->hkdf->derive_finished(this->hkdf, is_server, &finished_key);
+	if (!this->hkdf)
+	{
+		return FALSE;
+	}
 	if (!hash_data(this, this->handshake, &finished_hash))
 	{
 		DBG1(DBG_TLS, "creating hash of handshake failed");
+		return FALSE;
 	}
 
+	this->hkdf->derive_finished(this->hkdf, is_server, &finished_key);
+
+	/* FIXME: this should be handled inside hkdf (e.g. via
+	 * a method like allocate_bytes(key, seed, out) or directly replacing
+	 * derive_finished() so it does all that internally)
+	 *
+	 * maybe switch the names so that this is calculate_finished() and the
+	 * other calculate_finished_legacy() */
 	if (this->suite == TLS_AES_256_GCM_SHA384)
 	{
 		prf = lib->crypto->create_prf(lib->crypto, PRF_HMAC_SHA2_384);
@@ -1852,8 +1803,8 @@ METHOD(tls_crypto_t, calculate_finished_tls13, bool,
 	{
 		prf = lib->crypto->create_prf(lib->crypto, PRF_HMAC_SHA2_256);
 	}
-	if(!prf->set_key(prf, finished_key) ||
-	   !prf->allocate_bytes(prf, finished_hash, out))
+	if (!prf->set_key(prf, finished_key) ||
+		!prf->allocate_bytes(prf, finished_hash, out))
 	{
 		DBG1(DBG_TLS, "setting key or generating hash for HMAC failed");
 		chunk_clear(&finished_key);
@@ -1984,148 +1935,79 @@ METHOD(tls_crypto_t, derive_secrets, bool,
 		   expand_keys(this, client_random, server_random);
 }
 
-METHOD(tls_crypto_t, derive_handshake_secret, bool,
-	private_tls_crypto_t *this, chunk_t shared_secret)
+/**
+ * Derive and configure the keys/IVs using the given labels.
+ */
+static bool derive_labeled_keys(private_tls_crypto_t *this,
+								tls_hkdf_label_t client_label,
+								tls_hkdf_label_t server_label)
 {
-	chunk_t c_key, c_iv, s_key, s_iv;
-
-	this->hkdf->set_shared_secret(this->hkdf, shared_secret);
-
-	/* client key material */
-	if (!this->hkdf->generate_secret(this->hkdf, TLS_HKDF_C_HS_TRAFFIC,
-									 this->handshake, NULL) ||
-		!this->hkdf->derive_key(this->hkdf, FALSE,
-								this->aead_out->
-								get_encr_key_size(this->aead_out), &c_key) ||
-		!this->hkdf->derive_iv(this->hkdf, FALSE,
-							   this->aead_out->
-							   get_iv_size(this->aead_out), &c_iv))
-	{
-		DBG1(DBG_TLS, "deriving client key material failed");
-		chunk_clear(&c_key);
-		chunk_clear(&c_iv);
-		return FALSE;
-	}
-
-	/* server key material */
-	if (!this->hkdf->generate_secret(this->hkdf, TLS_HKDF_S_HS_TRAFFIC,
-	   this->handshake, NULL) ||
-	   !this->hkdf->derive_key(this->hkdf, TRUE, this->aead_in->
-	   get_encr_key_size(this->aead_in), &s_key) ||
-	   !this->hkdf->derive_iv(this->hkdf, TRUE, this->aead_in->
-	   get_iv_size(this->aead_in), &s_iv))
-	{
-		DBG1(DBG_TLS, "deriving server key material failed");
-		chunk_clear(&c_key);
-		chunk_clear(&c_iv);
-		chunk_clear(&s_key);
-		chunk_clear(&s_iv);
-		return FALSE;
-	}
+	chunk_t c_key = chunk_empty, c_iv = chunk_empty;
+	chunk_t s_key = chunk_empty, s_iv = chunk_empty;
+	tls_aead_t *aead_c = this->aead_out, *aead_s = this->aead_in;
+	bool success = FALSE;
 
 	if (this->tls->is_server(this->tls))
 	{
-		if (!this->aead_in->set_keys(this->aead_in, chunk_empty, s_key, s_iv) ||
-			!this->aead_out->set_keys(this->aead_out, chunk_empty, c_key, c_iv))
-		{
-			DBG1(DBG_TLS, "setting aead server key material failed");
-			chunk_clear(&c_key);
-			chunk_clear(&c_iv);
-			chunk_clear(&s_key);
-			chunk_clear(&s_iv);
-			return FALSE;
-		}
-	}
-	else
-	{
-		if (!this->aead_in->set_keys(this->aead_in, chunk_empty, s_key, s_iv) ||
-			!this->aead_out->set_keys(this->aead_out, chunk_empty, c_key, c_iv))
-		{
-			DBG1(DBG_TLS, "setting aead client key material failed");
-			chunk_clear(&c_key);
-			chunk_clear(&c_iv);
-			chunk_clear(&s_key);
-			chunk_clear(&s_iv);
-			return FALSE;
-		}
+		aead_c = this->aead_in;
+		aead_s = this->aead_out;
 	}
 
+	if (!this->hkdf->generate_secret(this->hkdf, client_label, this->handshake,
+									 NULL) ||
+		!this->hkdf->derive_key(this->hkdf, FALSE,
+								this->aead_out->get_encr_key_size(this->aead_out),
+								&c_key) ||
+		!this->hkdf->derive_iv(this->hkdf, FALSE,
+							   this->aead_out->get_iv_size(this->aead_out),
+							   &c_iv))
+	{
+		DBG1(DBG_TLS, "deriving client key material failed");
+		goto out;
+	}
+
+	if (!this->hkdf->generate_secret(this->hkdf, server_label, this->handshake,
+									 NULL) ||
+		!this->hkdf->derive_key(this->hkdf, TRUE,
+								this->aead_in->get_encr_key_size(this->aead_in),
+								&s_key) ||
+		!this->hkdf->derive_iv(this->hkdf, TRUE,
+							   this->aead_in->get_iv_size(this->aead_in),
+							   &s_iv))
+	{
+		DBG1(DBG_TLS, "deriving server key material failed");
+		goto out;
+	}
+
+	if (!aead_c->set_keys(aead_c, chunk_empty, c_key, c_iv) ||
+		!aead_s->set_keys(aead_s, chunk_empty, s_key, s_iv))
+	{
+		DBG1(DBG_TLS, "setting AEAD key material failed");
+		goto out;
+	}
+	success = TRUE;
+
+out:
 	chunk_clear(&c_key);
 	chunk_clear(&c_iv);
 	chunk_clear(&s_key);
 	chunk_clear(&s_iv);
-	return TRUE;
+	return success;
 }
 
-METHOD(tls_crypto_t, derive_app_secret, bool,
+METHOD(tls_crypto_t, derive_handshake_secrets, bool,
+	private_tls_crypto_t *this, chunk_t shared_secret)
+{
+	this->hkdf->set_shared_secret(this->hkdf, shared_secret);
+	return derive_labeled_keys(this, TLS_HKDF_C_HS_TRAFFIC,
+							   TLS_HKDF_S_HS_TRAFFIC);
+}
+
+METHOD(tls_crypto_t, derive_app_secrets, bool,
 	private_tls_crypto_t *this)
 {
-	chunk_t c_key, c_iv, s_key, s_iv;
-
-	/* client key material */
-	if (!this->hkdf->generate_secret(this->hkdf, TLS_HKDF_C_AP_TRAFFIC,
-									 this->handshake, NULL) ||
-		!this->hkdf->derive_key(this->hkdf, FALSE,
-								this->aead_out->
-								get_encr_key_size(this->aead_out), &c_key) ||
-		!this->hkdf->derive_iv(this->hkdf, FALSE,
-							   this->aead_out->
-							   get_iv_size(this->aead_out), &c_iv))
-	{
-		DBG1(DBG_TLS, "deriving client key material failed");
-		chunk_clear(&c_key);
-		chunk_clear(&c_iv);
-		return FALSE;
-	}
-
-	/* server key material */
-	if (!this->hkdf->generate_secret(this->hkdf, TLS_HKDF_S_AP_TRAFFIC,
-	   this->handshake, NULL) ||
-	   !this->hkdf->derive_key(this->hkdf, TRUE, this->aead_in->
-	   get_encr_key_size(this->aead_in), &s_key) ||
-	   !this->hkdf->derive_iv(this->hkdf, TRUE, this->aead_in->
-	   get_iv_size(this->aead_in), &s_iv))
-	{
-		DBG1(DBG_TLS, "deriving server key material failed");
-		chunk_clear(&c_key);
-		chunk_clear(&c_iv);
-		chunk_clear(&s_key);
-		chunk_clear(&s_iv);
-		return FALSE;
-	}
-
-	if (this->tls->is_server(this->tls))
-	{
-		if (!this->aead_in->set_keys(this->aead_in, chunk_empty, s_key, s_iv) ||
-			!this->aead_out->set_keys(this->aead_out, chunk_empty, c_key, c_iv))
-		{
-			DBG1(DBG_TLS, "setting aead server key material failed");
-			chunk_clear(&c_key);
-			chunk_clear(&c_iv);
-			chunk_clear(&s_key);
-			chunk_clear(&s_iv);
-			return FALSE;
-		}
-	}
-	else
-	{
-		if (!this->aead_in->set_keys(this->aead_in, chunk_empty, s_key, s_iv) ||
-			!this->aead_out->set_keys(this->aead_out, chunk_empty, c_key, c_iv))
-		{
-			DBG1(DBG_TLS, "setting aead client key material failed");
-			chunk_clear(&c_key);
-			chunk_clear(&c_iv);
-			chunk_clear(&s_key);
-			chunk_clear(&s_iv);
-			return FALSE;
-		}
-	}
-
-	chunk_clear(&c_key);
-	chunk_clear(&c_iv);
-	chunk_clear(&s_key);
-	chunk_clear(&s_iv);
-	return TRUE;
+	return derive_labeled_keys(this, TLS_HKDF_C_AP_TRAFFIC,
+							   TLS_HKDF_S_AP_TRAFFIC);
 }
 
 METHOD(tls_crypto_t, resume_session, tls_cipher_suite_t,
@@ -2208,8 +2090,6 @@ tls_crypto_t *tls_crypto_create(tls_t *tls, tls_cache_t *cache)
 	enumerator_t *enumerator;
 	credential_type_t type;
 	int subtype;
-	int hash_algorithm;
-	const char *plugin;
 
 	INIT(this,
 		.public = {
@@ -2227,8 +2107,8 @@ tls_crypto_t *tls_crypto_create(tls_t *tls, tls_cache_t *cache)
 			.calculate_finished = _calculate_finished,
 			.calculate_finished_tls13 = _calculate_finished_tls13,
 			.derive_secrets = _derive_secrets,
-			.derive_handshake_secret = _derive_handshake_secret,
-			.derive_app_secret = _derive_app_secret,
+			.derive_handshake_secrets = _derive_handshake_secrets,
+			.derive_app_secrets = _derive_app_secrets,
 			.resume_session = _resume_session,
 			.get_session = _get_session,
 			.change_cipher = _change_cipher,
@@ -2255,49 +2135,6 @@ tls_crypto_t *tls_crypto_create(tls_t *tls, tls_cache_t *cache)
 				default:
 					break;
 			}
-		}
-	}
-	enumerator->destroy(enumerator);
-
-	enumerator = lib->crypto->create_hasher_enumerator(lib->crypto);
-	while (enumerator->enumerate(enumerator, &hash_algorithm, &plugin))
-	{
-		switch (hash_algorithm)
-		{
-			case TLS_HASH_MD5:
-				if (tls->get_version_max(tls) < TLS_1_3)
-				{
-					this->md5 = TRUE;
-				}
-				else
-				{
-					this->md5 = FALSE;
-				}
-				break;
-			case TLS_HASH_SHA1:
-				this->sha1 = TRUE;
-				break;
-			case TLS_HASH_SHA224:
-				if (tls->get_version_max(tls) < TLS_1_3)
-				{
-					this->sha224 = TRUE;
-				}
-				else
-				{
-					this->sha224 = FALSE;
-				}
-				break;
-			case TLS_HASH_SHA384:
-				this->sha384 = TRUE;
-				break;
-			case TLS_HASH_SHA256:
-				this->sha256 = TRUE;
-				break;
-			case TLS_HASH_SHA512:
-				this->sha512 = TRUE;
-				break;
-			default:
-				continue;
 		}
 	}
 	enumerator->destroy(enumerator);
@@ -2360,4 +2197,18 @@ int tls_crypto_get_supported_suites(bool null, tls_cipher_suite_t **out)
 		}
 	}
 	return count;
+}
+
+/*
+ * Described in header
+ */
+tls_version_t tls_crypto_suite_min_version(tls_cipher_suite_t suite)
+{
+	suite_algs_t *algs = find_suite(suite);
+
+	if (algs)
+	{
+		return algs->tls_version;
+	}
+	return TLS_1_3;
 }

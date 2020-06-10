@@ -148,12 +148,10 @@ static status_t process_server_hello(private_tls_peer_t *this,
 									 bio_reader_t *reader)
 {
 	uint8_t compression;
-	uint16_t version, cipher;
-	chunk_t random, session, ext = chunk_empty, ext_key_share = chunk_empty;
+	uint16_t version, cipher, key_type;
+	bio_reader_t *extensions, *extension;
+	chunk_t random, session, ext = chunk_empty, key_share = chunk_empty;
 	tls_cipher_suite_t suite = 0;
-	int offset = 0;
-	uint16_t extension_type, extension_length;
-	uint16_t key_type, key_length;
 
 	this->crypto->append_handshake(this->crypto,
 								   TLS_SERVER_HELLO, reader->peek(reader));
@@ -172,50 +170,52 @@ static status_t process_server_hello(private_tls_peer_t *this,
 
 	memcpy(this->server_random, random.ptr, sizeof(this->server_random));
 
-	bio_reader_t *extension_reader = bio_reader_create(ext);
-
-	/* parse extension to decide which tls version of the state machine we
-	 * want to go
-	 */
-	while (offset < ext.len)
+	extensions = bio_reader_create(ext);
+	while (extensions->remaining(extensions))
 	{
-		chunk_t extension_payload = chunk_empty;
+		uint16_t extension_type;
+		chunk_t extension_data;
 
-		extension_reader->read_uint16(extension_reader, &extension_type);
-		extension_reader->read_uint16(extension_reader, &extension_length);
-		offset += extension_length + 4;
-
-		if (!extension_reader->read_data(extension_reader,
-										 extension_length,
-										 &extension_payload))
+		if (!extensions->read_uint16(extensions, &extension_type) ||
+			!extensions->read_data16(extensions, &extension_data))
 		{
-			DBG2(DBG_TLS, "unable to read extension payload data");
+			DBG1(DBG_TLS, "invalid extension in ServerHello");
+			this->alert->add(this->alert, TLS_FATAL, TLS_DECODE_ERROR);
+			extensions->destroy(extensions);
+			return NEED_MORE;
 		}
-
-		bio_reader_t *ext_payload_reader = bio_reader_create(extension_payload);
-
+		extension = bio_reader_create(extension_data);
 		switch (extension_type)
 		{
 			case TLS_EXT_SUPPORTED_VERSIONS:
-				ext_payload_reader->read_uint16(ext_payload_reader, &version);
-				break;
-
-			case TLS_EXT_KEY_SHARE:
-				ext_payload_reader->read_uint16(ext_payload_reader, &key_type);
-				ext_payload_reader->read_uint16(ext_payload_reader, &key_length);
-				if (!ext_payload_reader->read_data(ext_payload_reader,
-												   key_length,
-												   &ext_key_share))
+				if (!extension->read_uint16(extension, &version))
 				{
-					DBG2(DBG_TLS, "no valid key share found in extension");
+					DBG1(DBG_TLS, "invalid %N extension", tls_extension_names,
+						 extension_type);
+					this->alert->add(this->alert, TLS_FATAL, TLS_DECODE_ERROR);
+					extensions->destroy(extensions);
+					extension->destroy(extension);
+					return NEED_MORE;
+				}
+				break;
+			case TLS_EXT_KEY_SHARE:
+				if (!extension->read_uint16(extension, &key_type) ||
+					!extension->read_data16(extension, &key_share))
+				{
+					DBG1(DBG_TLS, "invalid %N extension", tls_extension_names,
+						 extension_type);
+					this->alert->add(this->alert, TLS_FATAL, TLS_DECODE_ERROR);
+					extensions->destroy(extensions);
+					extension->destroy(extension);
+					return NEED_MORE;
 				}
 				break;
 			default:
-				continue;
+				break;
 		}
-		ext_payload_reader->destroy(ext_payload_reader);
+		extension->destroy(extension);
 	}
-	extension_reader->destroy(extension_reader);
+	extensions->destroy(extensions);
 
 	if (!this->tls->set_version(this->tls, version))
 	{
@@ -244,6 +244,7 @@ static status_t process_server_hello(private_tls_peer_t *this,
 		DESTROY_IF(this->dh);
 		this->dh = NULL;
 	}
+
 	if (!suite)
 	{
 		suite = cipher;
@@ -262,22 +263,21 @@ static status_t process_server_hello(private_tls_peer_t *this,
 
 	if (this->tls->get_version_max(this->tls) == TLS_1_3)
 	{
-		chunk_t shared_secret;
+		chunk_t shared_secret = chunk_empty;
 
-		if (key_type != CURVE_25519 &&
-			!this->dh->set_other_public_value(this->dh, ext_key_share))
+		if (!this->dh->set_other_public_value(this->dh, key_share) ||
+			!this->dh->get_shared_secret(this->dh, &shared_secret) ||
+			!this->crypto->derive_handshake_secrets(this->crypto, shared_secret))
 		{
-			DBG2(DBG_TLS, "server key share unable to save");
+			DBG1(DBG_TLS, "DH key derivation failed");
+			this->alert->add(this->alert, TLS_FATAL, TLS_HANDSHAKE_FAILURE);
+			chunk_clear(&shared_secret);
+			return NEED_MORE;
 		}
-		if (!this->dh->get_shared_secret(this->dh, &shared_secret))
-		{
-			DBG2(DBG_TLS, "No shared secret key found");
-		}
+		chunk_clear(&shared_secret);
 
-		if (!this->crypto->derive_handshake_secret(this->crypto, shared_secret))
-		{
-			DBG2(DBG_TLS, "derive handshake traffic secret failed");
-		}
+		this->crypto->change_cipher(this->crypto, TRUE);
+		this->crypto->change_cipher(this->crypto, FALSE);
 	}
 
 	this->state = STATE_HELLO_RECEIVED;
@@ -285,19 +285,16 @@ static status_t process_server_hello(private_tls_peer_t *this,
 }
 
 /**
-* Process a server encrypted extensions message
-*/
+ * Process a server encrypted extensions message
+ */
 static status_t process_encrypted_extensions(private_tls_peer_t *this,
 											 bio_reader_t *reader)
 {
-	uint16_t length;
 	chunk_t ext = chunk_empty;
-	int offset = 0;
-	uint16_t extension_type, extension_length;
+	uint16_t length, extension_type;
 
-	this->crypto->append_handshake(this->crypto,
-								   TLS_ENCRYPTED_EXTENSIONS, reader->peek(reader));
-
+	this->crypto->append_handshake(this->crypto, TLS_ENCRYPTED_EXTENSIONS,
+								   reader->peek(reader));
 
 	if (!reader->read_uint16(reader, &length) ||
 		(reader->remaining(reader) && !reader->read_data16(reader, &ext)))
@@ -306,31 +303,24 @@ static status_t process_encrypted_extensions(private_tls_peer_t *this,
 		this->alert->add(this->alert, TLS_FATAL, TLS_DECODE_ERROR);
 		return NEED_MORE;
 	}
-	if (ext.len == 0)
+	if (ext.len)
 	{
-		this->state = STATE_ENCRYPTED_EXTENSIONS_RECEIVED;
-		return NEED_MORE;
-	}
-	else
-	{
-		bio_reader_t *extension_reader = bio_reader_create(ext);
+		bio_reader_t *extensions = bio_reader_create(ext);
 
-		while (offset < ext.len)
+		while (extensions->remaining(extensions))
 		{
-			chunk_t extension_payload = chunk_empty;
-			extension_reader->read_uint16(extension_reader, &extension_type);
-			extension_reader->read_uint16(extension_reader, &extension_length);
-			offset += extension_length + 4;
+			chunk_t extension_data = chunk_empty;
 
-			if (!extension_reader->read_data(extension_reader,
-											 extension_length,
-											 &extension_payload))
+			if (!extensions->read_uint16(extensions, &extension_type) ||
+				!extensions->read_data16(extensions, &extension_data))
 			{
-				DBG2(DBG_TLS, "unable to read extension payload data");
+				DBG1(DBG_TLS, "invalid extension in EncryptedExtensions");
+				this->alert->add(this->alert, TLS_FATAL, TLS_DECODE_ERROR);
+				extensions->destroy(extensions);
+				return NEED_MORE;
 			}
 			switch (extension_type)
 			{
-				/* fall through because not supported so far */
 				case TLS_EXT_SERVER_NAME:
 				case TLS_EXT_MAX_FRAGMENT_LENGTH:
 				case TLS_EXT_SUPPORTED_GROUPS:
@@ -338,19 +328,22 @@ static status_t process_encrypted_extensions(private_tls_peer_t *this,
 				case TLS_EXT_HEARTBEAT:
 				case TLS_EXT_APPLICATION_LAYER_PROTOCOL_NEGOTIATION:
 				case TLS_SERVER_CERTIFICATE_TYPE:
-					this->state = STATE_ENCRYPTED_EXTENSIONS_RECEIVED;
-					extension_reader->destroy(extension_reader);
+					/* not supported so far */
+					DBG2(DBG_TLS, "ignoring unsupported %N EncryptedExtension",
+						 tls_extension_names, extension_type);
 					break;
 				default:
-					DBG1(DBG_TLS, "received forbidden EncryptedExtensions");
+					DBG1(DBG_TLS, "received forbidden EncryptedExtension (%d)",
+						 extension_type);
 					this->alert->add(this->alert, TLS_FATAL,
 									 TLS_ILLEGAL_PARAMETER);
-					extension_reader->destroy(extension_reader);
+					extensions->destroy(extensions);
 					return NEED_MORE;
 			}
 		}
-
+		extensions->destroy(extensions);
 	}
+	this->state = STATE_ENCRYPTED_EXTENSIONS_RECEIVED;
 	return NEED_MORE;
 }
 
@@ -413,8 +406,9 @@ static status_t process_certificate(private_tls_peer_t *this,
 			return NEED_MORE;
 		}
 		if (data.len > 0)
-		{
-			DBG1(DBG_TLS, "certificate request context available,"
+		{	/* FIXME: what about this message? it SHALL be zero length
+			 * for server authentication! */
+			DBG1(DBG_TLS, "certificate request context available, "
 				 "but CertificateRequest not received");
 		}
 	}
@@ -470,62 +464,14 @@ static status_t process_certificate(private_tls_peer_t *this,
 		{
 			if (!certs->read_data16(certs, &data))
 			{
-				DBG1(DBG_TLS, "reading extension field of certificate failed",
-					 &data);
+				DBG1(DBG_TLS, "failed to read extensions of CertificateEntry");
 				this->alert->add(this->alert, TLS_FATAL, TLS_DECODE_ERROR);
 				return NEED_MORE;
 			}
-			break;
 		}
 	}
 	certs->destroy(certs);
 	this->state = STATE_CERT_RECEIVED;
-	return NEED_MORE;
-}
-
-/**
- *  Process Certificate verify
- */
-static status_t process_cert_verify(private_tls_peer_t *this,
-									bio_reader_t *reader)
-{
-	enumerator_t *enumerator;
-	public_key_t *public;
-	auth_cfg_t *auth;
-	bio_reader_t *sig;
-	bool verified = FALSE;
-
-	enumerator = lib->credmgr->create_public_enumerator(lib->credmgr,
-														KEY_ANY, this->server,
-														this->server_auth, TRUE);
-	while (enumerator->enumerate(enumerator, &public, &auth))
-	{
-		sig = bio_reader_create(reader->peek(reader));
-		verified = this->crypto->verify_handshake(this->crypto, public, sig);
-		sig->destroy(sig);
-		if (verified)
-		{
-			this->server_auth->merge(this->server_auth, auth, FALSE);
-			break;
-		}
-		DBG1(DBG_TLS, "signature verification failed, trying another key");
-	}
-	enumerator->destroy(enumerator);
-
-	if (!verified)
-	{
-		DBG1(DBG_TLS, "no trusted certificate found for '%Y' to verify TLS peer",
-			 this->server);
-		this->server->destroy(this->server);
-		this->peer = NULL;
-		this->state = STATE_KEY_EXCHANGE_RECEIVED;
-	}
-	else
-	{
-		this->state = STATE_CERT_VERIFY_RECEIVED;
-	}
-	this->crypto->append_handshake(this->crypto,
-								   TLS_CERTIFICATE_VERIFY, reader->peek(reader));
 	return NEED_MORE;
 }
 
@@ -558,6 +504,38 @@ static public_key_t *find_public_key(private_tls_peer_t *this)
 		enumerator->destroy(enumerator);
 	}
 	return public;
+}
+
+/**
+ *  Process CertificateVerify message
+ */
+static status_t process_cert_verify(private_tls_peer_t *this,
+									bio_reader_t *reader)
+{
+	public_key_t *public;
+	chunk_t msg;
+
+	public = find_public_key(this);
+	if (!public)
+	{
+		DBG1(DBG_TLS, "no TLS public key found for server '%Y'", this->server);
+		this->alert->add(this->alert, TLS_FATAL, TLS_CERTIFICATE_UNKNOWN);
+		return NEED_MORE;
+	}
+
+	msg = reader->peek(reader);
+	if (!this->crypto->verify_handshake(this->crypto, public, reader))
+	{
+		public->destroy(public);
+		DBG1(DBG_TLS, "signature verification failed");
+		this->alert->add(this->alert, TLS_FATAL, TLS_BAD_CERTIFICATE);
+		return NEED_MORE;
+	}
+	public->destroy(public);
+
+	this->crypto->append_handshake(this->crypto, TLS_CERTIFICATE_VERIFY, msg);
+	this->state = STATE_CERT_VERIFY_RECEIVED;
+	return NEED_MORE;
 }
 
 /**
@@ -858,8 +836,7 @@ static status_t process_hello_done(private_tls_peer_t *this,
 static status_t process_finished(private_tls_peer_t *this, bio_reader_t *reader)
 {
 	chunk_t received, verify_data;
-	char buf[12];
-	uint32_t hash_length;
+	u_char buf[12];
 
 	if (this->tls->get_version_max(this->tls) < TLS_1_3)
 	{
@@ -876,44 +853,39 @@ static status_t process_finished(private_tls_peer_t *this, bio_reader_t *reader)
 			this->alert->add(this->alert, TLS_FATAL, TLS_INTERNAL_ERROR);
 			return NEED_MORE;
 		}
-		if (!chunk_equals_const(received, chunk_from_thing(buf)))
-		{
-			DBG1(DBG_TLS, "received server finished invalid");
-			this->alert->add(this->alert, TLS_FATAL, TLS_DECRYPT_ERROR);
-			return NEED_MORE;
-		}
+		verify_data = chunk_from_thing(buf);
 	}
 	else
 	{
-		hash_length = reader->remaining(reader);
-		if (!reader->read_data(reader, hash_length, &received))
-		{
-			DBG1(DBG_TLS, "received server finished too short");
-			this->alert->add(this->alert, TLS_FATAL, TLS_DECODE_ERROR);
-			return NEED_MORE;
-		}
-		if (!this->crypto->calculate_finished_tls13(this->crypto, true,
-			&verify_data))
+		received = reader->peek(reader);
+		if (!this->crypto->calculate_finished_tls13(this->crypto, TRUE,
+													&verify_data))
 		{
 			DBG1(DBG_TLS, "calculating server finished failed");
 			this->alert->add(this->alert, TLS_FATAL, TLS_INTERNAL_ERROR);
 			return NEED_MORE;
 		}
-		if (!chunk_equals(received, verify_data))
-		{
-			DBG1(DBG_TLS, "received server finished invalid");
-			this->alert->add(this->alert, TLS_FATAL, TLS_DECRYPT_ERROR);
-			return NEED_MORE;
-		}
 	}
-	this->state = STATE_FINISHED_RECEIVED;
-	this->crypto->append_handshake(this->crypto, TLS_FINISHED, received);
 
+	if (!chunk_equals_const(received, verify_data))
+	{
+		DBG1(DBG_TLS, "received server finished invalid");
+		this->alert->add(this->alert, TLS_FATAL, TLS_DECRYPT_ERROR);
+		return NEED_MORE;
+	}
+
+	if (verify_data.ptr != buf)
+	{
+		chunk_free(&verify_data);
+	}
+
+	this->crypto->append_handshake(this->crypto, TLS_FINISHED, received);
+	this->state = STATE_FINISHED_RECEIVED;
 	return NEED_MORE;
 }
 
 /**
- * Process New Session Ticket message
+ * Process NewSessionTicket message
  */
 static status_t process_new_session_ticket(private_tls_peer_t *this,
 										   bio_reader_t *reader)
@@ -1059,17 +1031,20 @@ METHOD(tls_handshake_t, process, status_t,
  * Send a client hello
  */
 static status_t send_client_hello(private_tls_peer_t *this,
-							tls_handshake_type_t *type, bio_writer_t *writer)
+								  tls_handshake_type_t *type,
+								  bio_writer_t *writer)
 {
 	tls_cipher_suite_t *suites;
-	bio_writer_t *extensions, *curves = NULL;
+	bio_writer_t *extensions, *curves = NULL, *versions, *key_share;
 	tls_version_t version_max, version_min;
-	tls_named_group_t curve;
+	diffie_hellman_group_t group;
+	tls_named_group_t curve, selected_curve = 0;
 	enumerator_t *enumerator;
 	int count, i, v;
 	rng_t *rng;
 	chunk_t pub;
-	uint8_t nof_tls_versions;
+	/* FIXME: temporary hack until we have support for HelloRetryRequest */
+	tls_named_group_t requested_curve = TLS_CURVE25519;
 
 	htoun32(&this->client_random, time(NULL));
 	rng = lib->crypto->create_rng(lib->crypto, RNG_WEAK);
@@ -1083,9 +1058,6 @@ static status_t send_client_hello(private_tls_peer_t *this,
 		return NEED_MORE;
 	}
 	rng->destroy(rng);
-
-	/* client key generation */
-	this->dh = lib->crypto->create_dh(lib->crypto, CURVE_25519);
 
 	/* TLS version_max in handshake protocol */
 	version_max = this->tls->get_version_max(this->tls);
@@ -1137,22 +1109,23 @@ static status_t send_client_hello(private_tls_peer_t *this,
 	DBG2(DBG_TLS, "sending extension: %N",
 		 tls_extension_names, TLS_EXT_SUPPORTED_GROUPS);
 	enumerator = this->crypto->create_ec_enumerator(this->crypto);
-	while (enumerator->enumerate(enumerator, NULL, &curve))
+	while (enumerator->enumerate(enumerator, &group, &curve))
 	{
 		if (!curves)
 		{
 			extensions->write_uint16(extensions, TLS_EXT_SUPPORTED_GROUPS);
 			curves = bio_writer_create(16);
 		}
+		if (!this->dh && (!requested_curve || requested_curve == curve))
+		{
+			this->dh = lib->crypto->create_dh(lib->crypto, group);
+			selected_curve = curve;
+		}
 		curves->write_uint16(curves, curve);
 	}
 	enumerator->destroy(enumerator);
 	if (curves)
 	{
-		if (version_max == TLS_1_3)
-		{
-			curves->write_uint16(curves, TLS_CURVE25519);
-		}
 		curves->wrap16(curves);
 		extensions->write_data16(extensions, curves->get_buf(curves));
 		curves->destroy(curves);
@@ -1164,16 +1137,19 @@ static status_t send_client_hello(private_tls_peer_t *this,
 		extensions->write_uint8(extensions, TLS_EC_POINT_UNCOMPRESSED);
 	}
 
-	DBG2(DBG_TLS, "sending extension: %N",
-		 tls_extension_names, TLS_EXT_SUPPORTED_VERSIONS);
-	nof_tls_versions = (version_max - version_min + 1)*2;
-	extensions->write_uint16(extensions, TLS_EXT_SUPPORTED_VERSIONS);
-	extensions->write_uint16(extensions, nof_tls_versions+1);
-	extensions->write_uint8(extensions, nof_tls_versions);
-	for (v = version_max; v >= version_min; v--)
+	if (version_max >= TLS_1_3)
 	{
-		extensions->write_uint16(extensions, v);
-		nof_tls_versions += 2;
+		DBG2(DBG_TLS, "sending extension: %N",
+			 tls_extension_names, TLS_EXT_SUPPORTED_VERSIONS);
+		extensions->write_uint16(extensions, TLS_EXT_SUPPORTED_VERSIONS);
+		versions = bio_writer_create(0);
+		for (v = version_max; v >= version_min; v--)
+		{
+			versions->write_uint16(versions, v);
+		}
+		versions->wrap8(versions);
+		extensions->write_data16(extensions, versions->get_buf(versions));
+		versions->destroy(versions);
 	}
 
 	DBG2(DBG_TLS, "sending extension: %N",
@@ -1181,20 +1157,25 @@ static status_t send_client_hello(private_tls_peer_t *this,
 	extensions->write_uint16(extensions, TLS_EXT_SIGNATURE_ALGORITHMS);
 	this->crypto->get_signature_algorithms(this->crypto, extensions);
 
-	DBG2(DBG_TLS, "sending extension: %N",
-		 tls_extension_names, TLS_EXT_KEY_SHARE);
-	if (!this->dh->get_my_public_value(this->dh, &pub))
+	if (this->dh)
 	{
-		this->alert->add(this->alert, TLS_FATAL, TLS_INTERNAL_ERROR);
-		return NEED_MORE;
+		DBG2(DBG_TLS, "sending extension: %N",
+			 tls_extension_names, TLS_EXT_KEY_SHARE);
+		if (!this->dh->get_my_public_value(this->dh, &pub))
+		{
+			this->alert->add(this->alert, TLS_FATAL, TLS_INTERNAL_ERROR);
+			extensions->destroy(extensions);
+			return NEED_MORE;
+		}
+		extensions->write_uint16(extensions, TLS_EXT_KEY_SHARE);
+		key_share = bio_writer_create(pub.len + 6);
+		key_share->write_uint16(key_share, selected_curve);
+		key_share->write_data16(key_share, pub);
+		key_share->wrap16(key_share);
+		extensions->write_data16(extensions, key_share->get_buf(key_share));
+		key_share->destroy(key_share);
+		free(pub.ptr);
 	}
-	extensions->write_uint16(extensions, TLS_EXT_KEY_SHARE);
-	extensions->write_uint16(extensions, pub.len+6);
-	extensions->write_uint16(extensions, pub.len+4);
-	extensions->write_uint16(extensions, TLS_CURVE25519);
-	extensions->write_uint16(extensions, pub.len);
-	extensions->write_data(extensions, pub);
-	free(pub.ptr);
 
 	writer->write_data16(writer, extensions->get_buf(extensions));
 	extensions->destroy(extensions);
@@ -1451,15 +1432,14 @@ static status_t send_certificate_verify(private_tls_peer_t *this,
 static status_t send_finished(private_tls_peer_t *this,
 							  tls_handshake_type_t *type, bio_writer_t *writer)
 {
-	chunk_t verify_data;
-
 	*type = TLS_FINISHED;
 
 	if (this->tls->get_version_max(this->tls) < TLS_1_3)
 	{
 		char buf[12];
 
-		if (!this->crypto->calculate_finished(this->crypto, "client finished", buf))
+		if (!this->crypto->calculate_finished(this->crypto, "client finished",
+											  buf))
 		{
 			DBG1(DBG_TLS, "calculating client finished data failed");
 			this->alert->add(this->alert, TLS_FATAL, TLS_INTERNAL_ERROR);
@@ -1467,12 +1447,15 @@ static status_t send_finished(private_tls_peer_t *this,
 		}
 
 		writer->write_data(writer, chunk_from_thing(buf));
-		this->crypto->append_handshake(this->crypto, *type, writer->get_buf(writer));
+		this->crypto->append_handshake(this->crypto, *type,
+									   writer->get_buf(writer));
 	}
 	else
 	{
-		if (!this->crypto->calculate_finished_tls13(this->crypto, false,
-		   &verify_data))
+		chunk_t verify_data;
+
+		if (!this->crypto->calculate_finished_tls13(this->crypto, FALSE,
+													&verify_data))
 		{
 			DBG1(DBG_TLS, "calculating client finished data failed");
 			this->alert->add(this->alert, TLS_FATAL, TLS_INTERNAL_ERROR);
@@ -1480,6 +1463,7 @@ static status_t send_finished(private_tls_peer_t *this,
 		}
 
 		writer->write_data(writer, verify_data);
+		chunk_free(&verify_data);
 	}
 
 	this->state = STATE_FINISHED_SENT;
@@ -1525,14 +1509,15 @@ METHOD(tls_handshake_t, build, status_t,
 			case STATE_INIT:
 				return send_client_hello(this, type, writer);
 			case STATE_HELLO_DONE:
-				/* otherwise fall through to next state */
 			case STATE_CIPHERSPEC_CHANGED_OUT:
 			case STATE_FINISHED_RECEIVED:
-				/* fall through since legacy TLS and TLS 1.3
-				* expect the same message */
 				return send_finished(this, type, writer);
 			case STATE_FINISHED_SENT:
-				this->crypto->derive_app_secret(this->crypto);
+				if (!this->crypto->derive_app_secrets(this->crypto))
+				{
+					this->alert->add(this->alert, TLS_FATAL, TLS_INTERNAL_ERROR);
+					return NEED_MORE;
+				}
 				this->crypto->change_cipher(this->crypto, TRUE);
 				this->crypto->change_cipher(this->crypto, FALSE);
 				this->state = STATE_FINISHED_SENT_KEY_SWITCHED;
@@ -1612,9 +1597,8 @@ METHOD(tls_handshake_t, finished, bool,
 	{
 		if (this->resume)
 		{
-		return this->state == STATE_FINISHED_SENT;
+			return this->state == STATE_FINISHED_SENT;
 		}
-
 		return this->state == STATE_FINISHED_RECEIVED;
 	}
 	else

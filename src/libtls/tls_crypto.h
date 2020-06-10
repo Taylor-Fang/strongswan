@@ -362,7 +362,7 @@ enum tls_named_group_t {
 
 	/* TLS 1.3: new ecdhe, dhe groups */
 	TLS_CURVE25519 =    29,
-	TLS_CURVE_448  =    30,
+	TLS_CURVE448   =    30,
 	TLS_FFDHE2048  =    256,
 	TLS_FFDHE3072  =    257,
 	TLS_FFDHE4096  =    258,
@@ -514,7 +514,7 @@ struct tls_crypto_t {
 							 bio_reader_t *reader);
 
 	/**
-	 * Calculate the data of a legacyTLS finished message.
+	 * Calculate the data of a legacy TLS finished message.
 	 *
 	 * @param label			ASCII label to use for calculation
 	 * @param out			buffer to write finished data to
@@ -551,14 +551,14 @@ struct tls_crypto_t {
 	 * @param shared_secret 	input key material
 	 * @return 					TRUE if	secret derived successfully
 	 */
-	bool (*derive_handshake_secret)(tls_crypto_t *this, chunk_t shared_secret);
+	bool (*derive_handshake_secrets)(tls_crypto_t *this, chunk_t shared_secret);
 
 	/**
 	 * Derive the application keys.
 	 *
 	 * @return 					TRUE if	secret derived successfully
 	 */
-	bool (*derive_app_secret)(tls_crypto_t *this);
+	bool (*derive_app_secrets)(tls_crypto_t *this);
 
 	/**
 	 * Try to resume a TLS session, derive key material.
@@ -619,5 +619,13 @@ tls_crypto_t *tls_crypto_create(tls_t *tls, tls_cache_t *cache);
  * @return				number of suites supported
  */
 int tls_crypto_get_supported_suites(bool null, tls_cipher_suite_t **suites);
+
+/**
+ * Returns the minimum TLS version in which the given cipher suite is supported.
+ *
+ * @param suite			cipher suite in question
+ * @return				minimum TLS version
+ */
+tls_version_t tls_crypto_suite_min_version(tls_cipher_suite_t suite);
 
 #endif /** TLS_CRYPTO_H_ @}*/
