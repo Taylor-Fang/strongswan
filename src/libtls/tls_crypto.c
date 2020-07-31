@@ -1242,6 +1242,7 @@ static void destroy_aeads(private_tls_crypto_t *this)
 static bool create_ciphers(private_tls_crypto_t *this, suite_algs_t *algs)
 {
 	destroy_aeads(this);
+	DESTROY_IF(this->hkdf);
 	DESTROY_IF(this->prf);
 	if (this->tls->get_version_max(this->tls) < TLS_1_3)
 	{
@@ -1541,6 +1542,30 @@ static bool hash_data(private_tls_crypto_t *this, chunk_t data, chunk_t *hash)
 		sha1->destroy(sha1);
 
 		*hash = chunk_clone(chunk_from_thing(buf));
+	}
+	return TRUE;
+}
+
+METHOD(tls_crypto_t, hash_handshake, bool,
+	private_tls_crypto_t *this, chunk_t *out)
+{
+	chunk_t hash;
+
+	if (!hash_data(this, this->handshake, &hash))
+	{
+		return FALSE;
+	}
+
+	chunk_free(&this->handshake);
+	append_handshake(this, TLS_MESSAGE_HASH, hash);
+
+	if (out)
+	{
+		*out = hash;
+	}
+	else
+	{
+		free(hash.ptr);
 	}
 	return TRUE;
 }
@@ -2100,6 +2125,7 @@ tls_crypto_t *tls_crypto_create(tls_t *tls, tls_cache_t *cache)
 			.create_ec_enumerator = _create_ec_enumerator,
 			.set_protection = _set_protection,
 			.append_handshake = _append_handshake,
+			.hash_handshake = _hash_handshake,
 			.sign = _sign,
 			.verify = _verify,
 			.sign_handshake = _sign_handshake,

@@ -121,6 +121,11 @@ struct private_tls_peer_t {
 	diffie_hellman_t *dh;
 
 	/**
+	 * Requested DH group
+	 */
+	tls_named_group_t requested_curve;
+
+	/**
 	 * Resuming a session?
 	 */
 	bool resume;
@@ -150,12 +155,11 @@ static status_t process_server_hello(private_tls_peer_t *this,
 	uint8_t compression;
 	uint16_t version, cipher, key_type;
 	bio_reader_t *extensions, *extension;
-	chunk_t random, session, ext = chunk_empty, key_share = chunk_empty;
+	chunk_t msg, random, session, ext = chunk_empty, key_share = chunk_empty;
 	tls_cipher_suite_t suite = 0;
+	bool is_retry_request;
 
-	this->crypto->append_handshake(this->crypto,
-								   TLS_SERVER_HELLO, reader->peek(reader));
-
+	msg = reader->peek(reader);
 	if (!reader->read_uint16(reader, &version) ||
 		!reader->read_data(reader, sizeof(this->server_random), &random) ||
 		!reader->read_data8(reader, &session) ||
@@ -167,6 +171,12 @@ static status_t process_server_hello(private_tls_peer_t *this,
 		this->alert->add(this->alert, TLS_FATAL, TLS_DECODE_ERROR);
 		return NEED_MORE;
 	}
+
+	is_retry_request = chunk_equals_const(random, chunk_from_chars(
+								0xCF,0x21,0xAD,0x74,0xE5,0x9A,0x61,0x11,
+								0xBE,0x1D,0x8C,0x02,0x1E,0x65,0xB8,0x91,
+								0xC2,0xA2,0x11,0x16,0x7A,0xBB,0x8C,0x5E,
+								0x07,0x9E,0x09,0xE2,0xC8,0xA8,0x33,0x9C));
 
 	memcpy(this->server_random, random.ptr, sizeof(this->server_random));
 
@@ -200,7 +210,8 @@ static status_t process_server_hello(private_tls_peer_t *this,
 				break;
 			case TLS_EXT_KEY_SHARE:
 				if (!extension->read_uint16(extension, &key_type) ||
-					!extension->read_data16(extension, &key_share))
+					(!is_retry_request &&
+					 !extension->read_data16(extension, &key_share)))
 				{
 					DBG1(DBG_TLS, "invalid %N extension", tls_extension_names,
 						 extension_type);
@@ -259,6 +270,31 @@ static status_t process_server_hello(private_tls_peer_t *this,
 			 tls_version_names, version, tls_cipher_suite_names, suite);
 		free(this->session.ptr);
 		this->session = chunk_clone(session);
+	}
+
+	if (is_retry_request)
+	{
+		if (!this->crypto->hash_handshake(this->crypto, NULL))
+		{
+			DBG1(DBG_TLS, "failed to hash handshake messages");
+			this->alert->add(this->alert, TLS_FATAL, TLS_INTERNAL_ERROR);
+			return NEED_MORE;
+		}
+	}
+	this->crypto->append_handshake(this->crypto, TLS_SERVER_HELLO, msg);
+
+	/* FIXME: there should be some additional checks (e.g. whether we actually
+	 * proposed the received group or if we didn't already send a key share for
+	 * it and more) and the cookie extension should be handled */
+	if (is_retry_request)
+	{
+		DBG1(DBG_TLS, "server requested key exchange with %N",
+			 tls_named_group_names, key_type);
+		DESTROY_IF(this->dh);
+		this->dh = NULL;
+		this->requested_curve = key_type;
+		this->state = STATE_INIT;
+		return NEED_MORE;
 	}
 
 	if (this->tls->get_version_max(this->tls) == TLS_1_3)
@@ -1043,8 +1079,6 @@ static status_t send_client_hello(private_tls_peer_t *this,
 	int count, i, v;
 	rng_t *rng;
 	chunk_t pub;
-	/* FIXME: temporary hack until we have support for HelloRetryRequest */
-	tls_named_group_t requested_curve = TLS_CURVE25519;
 
 	htoun32(&this->client_random, time(NULL));
 	rng = lib->crypto->create_rng(lib->crypto, RNG_WEAK);
@@ -1111,14 +1145,22 @@ static status_t send_client_hello(private_tls_peer_t *this,
 	enumerator = this->crypto->create_ec_enumerator(this->crypto);
 	while (enumerator->enumerate(enumerator, &group, &curve))
 	{
+		if (this->requested_curve && this->requested_curve != curve)
+		{
+			continue;
+		}
 		if (!curves)
 		{
 			extensions->write_uint16(extensions, TLS_EXT_SUPPORTED_GROUPS);
 			curves = bio_writer_create(16);
 		}
-		if (!this->dh && (!requested_curve || requested_curve == curve))
+		if (!this->dh)
 		{
 			this->dh = lib->crypto->create_dh(lib->crypto, group);
+			if (!this->dh)
+			{
+				continue;
+			}
 			selected_curve = curve;
 		}
 		curves->write_uint16(curves, curve);
@@ -1562,7 +1604,8 @@ METHOD(tls_handshake_t, cipherspec_changed, bool,
 	{
 		if (inbound)
 		{
-			return this->state == STATE_HELLO_RECEIVED;
+			return this->state == STATE_HELLO_RECEIVED ||
+					(this->state == STATE_INIT && this->requested_curve);
 		}
 		else
 		{
@@ -1578,6 +1621,11 @@ METHOD(tls_handshake_t, change_cipherspec, void,
 	if (this->tls->get_version_max(this->tls) < TLS_1_3)
 	{
 		this->crypto->change_cipher(this->crypto, inbound);
+	}
+
+	if (this->state == STATE_INIT && this->requested_curve)
+	{
+		return;
 	}
 
 	if (inbound)
